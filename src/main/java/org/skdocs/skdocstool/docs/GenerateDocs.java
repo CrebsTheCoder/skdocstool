@@ -1176,7 +1176,7 @@ public class GenerateDocs {
 
         if (clean.contains("minecraft:")) {
             int idx = clean.indexOf("minecraft:");
-            return clean.substring(idx).replaceAll("[^a-zA-Z0-9:_/].*", "").trim().toLowerCase(Locale.ROOT);
+            return clean.substring(idx).replaceAll("[^a-zA-Z0-9:_/.\\-].*", "").trim().toLowerCase(Locale.ROOT);
         } else if (clean.contains("{") && clean.contains("}")) {
             int openBrace = clean.indexOf('{');
             int closeBrace = clean.lastIndexOf('}');
