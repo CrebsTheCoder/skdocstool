@@ -136,26 +136,18 @@ public class GenerateDocs {
 
     private static Map<Class<?>, Object> buildSkrParserMap(Registration reg) {
         Map<Class<?>, Object> map = new HashMap<>();
-        if (reg == null) {
-            Logger.getLogger("skdocstool").info("[SKR-DEBUG] Registration is null");
-            return map;
-        }
+        if (reg == null) return map;
         try {
             Method listMethod = reg.getClass().getMethod("getTypes");
             Collection<?> registrars = (Collection<?>) listMethod.invoke(reg);
-            Logger.getLogger("skdocstool").info("[SKR-DEBUG] getTypes() returned " + registrars.size() + " items");
 
             for (Object r : registrars) {
                 if (r == null) continue;
-                Logger.getLogger("skdocstool").info("[SKR-DEBUG] --- TypeRegistration class: " + r.getClass().getName());
                 for (Class<?> c = r.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
                     for (Field f : c.getDeclaredFields()) {
                         try {
                             f.setAccessible(true);
-                            Object val = f.get(r);
-                            Logger.getLogger("skdocstool").info("[SKR-DEBUG]   field " + f.getName()
-                                    + " : " + f.getType().getSimpleName()
-                                    + " = " + (val == null ? "null" : val.getClass().getName()));
+                            f.get(r);
                         } catch (Exception ignored) {}
                     }
                 }
@@ -165,7 +157,12 @@ public class GenerateDocs {
                 Method getC = findMethod(classInfo.getClass(), "getC");
                 if (getC == null) continue;
                 getC.setAccessible(true);
-                Object clsObj = getC.invoke(classInfo);
+                Object clsObj;
+                try {
+                    clsObj = getC.invoke(classInfo);
+                } catch (Exception ignored) {
+                    continue;
+                }
                 if (!(clsObj instanceof Class<?> cls)) continue;
 
                 Object parser = null;
@@ -176,14 +173,9 @@ public class GenerateDocs {
                 }
                 if (parser == null) parser = skrGetField(r, "parser");
 
-                Logger.getLogger("skdocstool").info("[SKR-DEBUG] resolved for " + cls.getSimpleName()
-                        + " -> parser = " + (parser == null ? "null" : parser.getClass().getName()));
-
                 if (parser != null) map.put(cls, parser);
             }
-        } catch (Exception e) {
-            Logger.getLogger("skdocstool").warning("[SKR-DEBUG] " + e);
-        }
+        } catch (Exception ignored) {}
         return map;
     }
 
