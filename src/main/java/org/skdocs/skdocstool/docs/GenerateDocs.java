@@ -134,6 +134,59 @@ public class GenerateDocs {
         return map;
     }
 
+    private static Map<Class<?>, Object> buildSkrParserMap(Registration reg) {
+        Map<Class<?>, Object> map = new HashMap<>();
+        if (reg == null) {
+            Logger.getLogger("skdocstool").info("[SKR-DEBUG] Registration is null");
+            return map;
+        }
+        try {
+            Method listMethod = reg.getClass().getMethod("getTypes");
+            Collection<?> registrars = (Collection<?>) listMethod.invoke(reg);
+            Logger.getLogger("skdocstool").info("[SKR-DEBUG] getTypes() returned " + registrars.size() + " items");
+
+            for (Object r : registrars) {
+                if (r == null) continue;
+                Logger.getLogger("skdocstool").info("[SKR-DEBUG] --- TypeRegistration class: " + r.getClass().getName());
+                for (Class<?> c = r.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
+                    for (Field f : c.getDeclaredFields()) {
+                        try {
+                            f.setAccessible(true);
+                            Object val = f.get(r);
+                            Logger.getLogger("skdocstool").info("[SKR-DEBUG]   field " + f.getName()
+                                    + " : " + f.getType().getSimpleName()
+                                    + " = " + (val == null ? "null" : val.getClass().getName()));
+                        } catch (Exception ignored) {}
+                    }
+                }
+
+                Object classInfo = skrGetField(r, "classInfo");
+                if (classInfo == null) continue;
+                Method getC = findMethod(classInfo.getClass(), "getC");
+                if (getC == null) continue;
+                getC.setAccessible(true);
+                Object clsObj = getC.invoke(classInfo);
+                if (!(clsObj instanceof Class<?> cls)) continue;
+
+                Object parser = null;
+                Method getParser = findMethod(classInfo.getClass(), "getParser");
+                if (getParser != null) {
+                    getParser.setAccessible(true);
+                    try { parser = getParser.invoke(classInfo); } catch (Exception ignored) {}
+                }
+                if (parser == null) parser = skrGetField(r, "parser");
+
+                Logger.getLogger("skdocstool").info("[SKR-DEBUG] resolved for " + cls.getSimpleName()
+                        + " -> parser = " + (parser == null ? "null" : parser.getClass().getName()));
+
+                if (parser != null) map.put(cls, parser);
+            }
+        } catch (Exception e) {
+            Logger.getLogger("skdocstool").warning("[SKR-DEBUG] " + e);
+        }
+        return map;
+    }
+
     private static Documentation skrGetDocumentation(Object registrar) {
         try {
             Method m = findMethod(registrar.getClass(), "getDocumentation");
@@ -523,7 +576,9 @@ public class GenerateDocs {
     private static JsonObject buildAddonDocs(SkriptAddon addon) {
         SyntaxRegistry registry = addon.syntaxRegistry();
         ClassLoader loader = resolveAddonClassLoader(addon);
-        Map<Class<?>, RegistrationDoc> regDocs = buildRegistrationDocMap(findPluginForAddon(addon));
+        Plugin owningPlugin = findPluginForAddon(addon);
+        Map<Class<?>, RegistrationDoc> regDocs = buildRegistrationDocMap(owningPlugin);
+        Map<Class<?>, Object> skrParsers = buildSkrParserMap(findSkrRegistration(owningPlugin));
 
         JsonArray events = eventsArray(registry, loader, regDocs, false, addon.name());
         JsonArray conditions = syntaxArray(registry, SyntaxRegistry.CONDITION, loader, regDocs);
@@ -531,7 +586,7 @@ public class GenerateDocs {
         JsonArray expressions = syntaxArray(registry, SyntaxRegistry.EXPRESSION, loader, regDocs);
         JsonArray sections = syntaxArray(registry, SyntaxRegistry.SECTION, loader, regDocs);
         JsonArray structures = syntaxArray(registry, SyntaxRegistry.STRUCTURE, loader, regDocs);
-        JsonArray types = typesArray(loader, regDocs);
+        JsonArray types = typesArray(loader, regDocs, skrParsers);
         JsonArray functions = functionsArray(addon, loader);
 
         Set<String> idSet = new LinkedHashSet<>();
@@ -563,13 +618,15 @@ public class GenerateDocs {
     private static JsonObject buildSkriptHubDocs(SkriptAddon addon) {
         SyntaxRegistry registry = addon.syntaxRegistry();
         ClassLoader loader = resolveAddonClassLoader(addon);
-        Map<Class<?>, RegistrationDoc> regDocs = buildRegistrationDocMap(findPluginForAddon(addon));
+        Plugin owningPlugin = findPluginForAddon(addon);
+        Map<Class<?>, RegistrationDoc> regDocs = buildRegistrationDocMap(owningPlugin);
+        Map<Class<?>, Object> skrParsers = buildSkrParserMap(findSkrRegistration(owningPlugin));
 
         JsonArray events = shEventsArray(registry, loader, regDocs, addon.name());
         JsonArray conditions = shSyntaxArray(registry, SyntaxRegistry.CONDITION, loader, regDocs);
         JsonArray effects = shSyntaxArray(registry, SyntaxRegistry.EFFECT, loader, regDocs);
         JsonArray expressions = shSyntaxArray(registry, SyntaxRegistry.EXPRESSION, loader, regDocs);
-        JsonArray types = shTypesArray(loader, regDocs);
+        JsonArray types = shTypesArray(loader, regDocs, skrParsers);
         JsonArray functions = shFunctionsArray(addon, loader);
         JsonArray sections = shSyntaxArray(registry, SyntaxRegistry.SECTION, loader, regDocs);
         JsonArray structures = shSyntaxArray(registry, SyntaxRegistry.STRUCTURE, loader, regDocs);
@@ -649,15 +706,19 @@ public class GenerateDocs {
         return fallback;
     }
 
-    private static JsonArray shTypesArray(ClassLoader loader, Map<Class<?>, RegistrationDoc> regDocs) {
-        return typesArray(loader, true, regDocs);
+    private static JsonArray shTypesArray(ClassLoader loader, Map<Class<?>, RegistrationDoc> regDocs,
+                                          Map<Class<?>, Object> skrParsers) {
+        return typesArray(loader, true, regDocs, skrParsers);
     }
 
-    private static JsonArray typesArray(ClassLoader loader, Map<Class<?>, RegistrationDoc> regDocs) {
-        return typesArray(loader, false, regDocs);
+    private static JsonArray typesArray(ClassLoader loader, Map<Class<?>, RegistrationDoc> regDocs,
+                                        Map<Class<?>, Object> skrParsers) {
+        return typesArray(loader, false, regDocs, skrParsers);
     }
 
-    private static JsonArray typesArray(ClassLoader loader, boolean skriptHub, Map<Class<?>, RegistrationDoc> regDocs) {
+    private static JsonArray typesArray(ClassLoader loader, boolean skriptHub,
+                                        Map<Class<?>, RegistrationDoc> regDocs,
+                                        Map<Class<?>, Object> skrParsers) {
         JsonArray arr = new JsonArray();
         for (ClassInfo<?> info : Classes.getClassInfos()) {
             if (!isOwnedType(info, loader)) continue;
@@ -690,7 +751,7 @@ public class GenerateDocs {
             obj.addProperty("id", id);
             obj.addProperty("name", name);
 
-            String[] usage = extractValidEnumValues(info);
+            String[] usage = extractValidEnumValues(info, skrParsers != null ? skrParsers.get(info.getC()) : null);
             if (usage != null && usage.length > 0) {
                 JsonArray usageArr = new JsonArray();
                 for (String u : usage) {
@@ -1076,73 +1137,69 @@ public class GenerateDocs {
         return out;
     }
 
-    private static String[] extractValidEnumValues(ClassInfo<?> info) {
+    private static String[] extractValidEnumValues(ClassInfo<?> info, Object skrParserOverride) {
         try {
             Object supplierObj = info.getSupplier();
             if (supplierObj != null) {
                 List<String> results = new ArrayList<>();
-                try {
-                    Method getMethod = findMethod(supplierObj.getClass(), "get");
-                    if (getMethod != null) {
-                        getMethod.setAccessible(true);
-                        Object iterator = getMethod.invoke(supplierObj);
+                Method getMethod = findMethod(supplierObj.getClass(), "get");
+                if (getMethod != null) {
+                    getMethod.setAccessible(true);
+                    Object iterator = getMethod.invoke(supplierObj);
 
-                        if (iterator instanceof Iterator<?> iter) {
-                            while (iter.hasNext()) {
-                                Object value = iter.next();
-                                if (value == null) continue;
+                    if (iterator instanceof Iterator<?> iter) {
+                        Object parser = skrParserOverride != null ? skrParserOverride : info.getParser();
+                        while (iter.hasNext()) {
+                            Object value = iter.next();
+                            if (value == null) continue;
 
-                                String stringValue = null;
+                            String stringValue = null;
 
-                                try {
-                                    Method getKeyMethod = value.getClass().getMethod("getKey");
-                                    getKeyMethod.setAccessible(true);
-                                    Object key = getKeyMethod.invoke(value);
-                                    if (key != null) stringValue = key.toString();
-                                } catch (Exception ignored) {}
-
-                                if (stringValue == null || stringValue.isBlank()) {
-                                    Object parser = info.getParser();
-                                    if (parser != null) {
-                                        try {
-                                            for (Method method : parser.getClass().getMethods()) {
-                                                if (method.getName().equals("toString") && method.getParameterCount() == 2) {
-                                                    try {
-                                                        Object result = method.invoke(parser, value, 0);
-                                                        if (result instanceof String) {
-                                                            stringValue = (String) result;
-                                                            break;
-                                                        }
-                                                    } catch (Exception ignored1) {}
-                                                }
-                                            }
-                                        } catch (Exception ignored) {}
-                                    }
-                                }
-
-                                if (stringValue == null || stringValue.isBlank()) {
-                                    if (value instanceof Enum<?>) {
-                                        stringValue = ((Enum<?>) value).name();
-                                    } else {
-                                        try {
-                                            Method getNameMethod = value.getClass().getMethod("getName");
-                                            stringValue = (String) getNameMethod.invoke(value);
-                                        } catch (Exception ignored) {
-                                            stringValue = value.toString();
+                            if (parser != null) {
+                                for (Method method : parser.getClass().getMethods()) {
+                                    if (!method.getName().equals("toString")) continue;
+                                    if (method.getParameterCount() != 2) continue;
+                                    if (method.getParameterTypes()[1] != int.class) continue;
+                                    try {
+                                        method.setAccessible(true);
+                                        Object result = method.invoke(parser, value, 0);
+                                        if (result instanceof String s && !s.isBlank()) {
+                                            stringValue = s;
+                                            break;
                                         }
-                                    }
-                                }
-
-                                if (stringValue != null && !stringValue.isBlank()) {
-                                    String cleaned = cleanTypeUsageValue(stringValue);
-                                    if (!cleaned.isBlank()) results.add(cleaned);
+                                    } catch (Exception ignored) {}
                                 }
                             }
 
-                            if (!results.isEmpty()) return results.toArray(new String[0]);
+                            if (stringValue == null || stringValue.isBlank()) {
+                                try {
+                                    Method getKeyMethod = value.getClass().getMethod("getKey");
+                                    Object key = getKeyMethod.invoke(value);
+                                    if (key != null) stringValue = key.toString();
+                                } catch (Exception ignored) {}
+                            }
+
+                            if (stringValue == null || stringValue.isBlank()) {
+                                if (value instanceof Enum<?> e) {
+                                    stringValue = e.name();
+                                } else {
+                                    try {
+                                        Method getNameMethod = value.getClass().getMethod("getName");
+                                        Object n = getNameMethod.invoke(value);
+                                        if (n != null) stringValue = n.toString();
+                                    } catch (Exception ignored) {
+                                        stringValue = value.toString();
+                                    }
+                                }
+                            }
+
+                            if (stringValue != null && !stringValue.isBlank()) {
+                                results.add(cleanTypeUsageValue(stringValue));
+                            }
                         }
+                        if (!results.isEmpty()) return results.toArray(new String[0]);
                     }
-                } catch (Exception ignored) {}
+                }
             }
         } catch (Exception ignored) {}
 
@@ -1152,8 +1209,8 @@ public class GenerateDocs {
                 Object[] constants = c.getEnumConstants();
                 List<String> values = new ArrayList<>();
                 for (Object constant : constants) {
-                    if (constant instanceof Enum<?>) {
-                        values.add(((Enum<?>) constant).name().toLowerCase(Locale.ROOT));
+                    if (constant instanceof Enum<?> e) {
+                        values.add(cleanTypeUsageValue(e.name().toLowerCase(Locale.ROOT)));
                     }
                 }
                 if (!values.isEmpty()) return values.toArray(new String[0]);
