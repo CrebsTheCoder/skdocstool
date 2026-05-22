@@ -7,8 +7,6 @@ import ch.njol.skript.lang.function.Function;
 import ch.njol.skript.lang.function.Functions;
 import ch.njol.skript.lang.function.Signature;
 import ch.njol.skript.registrations.Classes;
-import com.github.shanebeee.skr.Documentation;
-import com.github.shanebeee.skr.Registration;
 import com.google.gson.*;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -41,18 +39,23 @@ public class GenerateDocs {
     private static final Set<String> REGISTRATION_METHODS =
             Set.of("getConditions", "getEffects", "getExpressions", "getEvents");
 
-    private static Registration findSkrRegistration(Plugin plugin) {
-        if (plugin == null) return null;
-        try {
-            Class.forName("com.github.shanebeee.skr.Registration");
-        } catch (ClassNotFoundException e) {
-            return null;
+    private static boolean isClassNamed(Class<?> cls, String fqn) {
+        for (Class<?> c = cls; c != null && c != Object.class; c = c.getSuperclass()) {
+            if (c.getName().equals(fqn)) return true;
+            for (Class<?> i : c.getInterfaces()) {
+                if (i.getName().equals(fqn)) return true;
+            }
         }
-        return findFieldOfType(plugin, Registration.class);
+        return false;
     }
 
-    @SuppressWarnings("unchecked")
-    private static <T> T findFieldOfType(Object obj, Class<T> target) {
+    private static Object findSkrRegistration(Plugin plugin) {
+        if (plugin == null) return null;
+        return findFieldByClassName(plugin, "com.github.shanebeee.skr.Registration");
+    }
+
+    @SuppressWarnings("SameParameterValue")
+    private static Object findFieldByClassName(Object obj, String targetClassName) {
         if (obj == null) return null;
         for (Class<?> c = obj.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
             for (Field f : c.getDeclaredFields()) {
@@ -60,13 +63,13 @@ public class GenerateDocs {
                     f.setAccessible(true);
                     Object val = f.get(obj);
                     if (val == null) continue;
-                    if (target.isInstance(val)) return (T) val;
+                    if (isClassNamed(val.getClass(), targetClassName)) return val;
                     for (Class<?> c2 = val.getClass(); c2 != null && c2 != Object.class; c2 = c2.getSuperclass()) {
                         for (Field f2 : c2.getDeclaredFields()) {
                             try {
                                 f2.setAccessible(true);
                                 Object val2 = f2.get(val);
-                                if (target.isInstance(val2)) return (T) val2;
+                                if (val2 != null && isClassNamed(val2.getClass(), targetClassName)) return val2;
                             } catch (Exception ignored) {}
                         }
                     }
@@ -76,7 +79,7 @@ public class GenerateDocs {
         return null;
     }
 
-    private static Map<Class<?>, RegistrationDoc> buildSkrDocMap(Registration reg) {
+    private static Map<Class<?>, RegistrationDoc> buildSkrDocMap(Object reg) {
         Map<Class<?>, RegistrationDoc> map = new HashMap<>();
         if (reg == null) return map;
 
@@ -99,7 +102,7 @@ public class GenerateDocs {
                 Collection<?> registrars = (Collection<?>) listMethod.invoke(reg);
                 for (Object r : registrars) {
                     if (r == null) continue;
-                    Documentation doc = skrGetDocumentation(r);
+                    Object doc = skrGetDocumentation(r);
                     if (doc == null) continue;
                     RegistrationDoc rd = skrDocToRegistrationDoc(doc);
 
@@ -134,7 +137,7 @@ public class GenerateDocs {
         return map;
     }
 
-    private static Map<Class<?>, Object> buildSkrParserMap(Registration reg) {
+    private static Map<Class<?>, Object> buildSkrParserMap(Object reg) {
         Map<Class<?>, Object> map = new HashMap<>();
         if (reg == null) return map;
         try {
@@ -179,13 +182,15 @@ public class GenerateDocs {
         return map;
     }
 
-    private static Documentation skrGetDocumentation(Object registrar) {
+    private static Object skrGetDocumentation(Object registrar) {
         try {
             Method m = findMethod(registrar.getClass(), "getDocumentation");
             if (m == null) return null;
             m.setAccessible(true);
             Object result = m.invoke(registrar);
-            if (result instanceof Documentation doc) return doc;
+            if (result == null) return null;
+            if (isClassNamed(result.getClass(), "com.github.shanebeee.skr.Documentation")) return result;
+            return null;
         } catch (Exception ignored) {}
         return null;
     }
@@ -210,25 +215,15 @@ public class GenerateDocs {
         map.put(cls, rd);
     }
 
-    private static RegistrationDoc skrDocToRegistrationDoc(Documentation doc) {
+    private static RegistrationDoc skrDocToRegistrationDoc(Object doc) {
         if (doc == null) return null;
-        String name     = doc.getName();
-        boolean noDoc   = doc.isNoDoc();
-        String[] desc     = skrInvokeStrArr(doc, "getDescription");
-        String[] examples = skrInvokeStrArr(doc, "getExamples");
-        String[] since    = skrInvokeStrArr(doc, "getSince");
-        String[] keywords = skrInvokeStrArr(doc, "getKeywords");
+        String name       = invokeStr(doc, "getName");
+        boolean noDoc     = invokeBoolean(doc, "isNoDoc");
+        String[] desc     = invokeStrArr(doc, "getDescription");
+        String[] examples = invokeStrArr(doc, "getExamples");
+        String[] since    = invokeStrArr(doc, "getSince");
+        String[] keywords = invokeStrArr(doc, "getKeywords");
         return new RegistrationDoc(name, desc, examples, since, keywords, noDoc);
-    }
-
-    private static String[] skrInvokeStrArr(Object obj, String methodName) {
-        try {
-            Method m = obj.getClass().getDeclaredMethod(methodName);
-            m.setAccessible(true);
-            Object val = m.invoke(obj);
-            if (val instanceof String[] arr) return arr;
-        } catch (Exception ignored) {}
-        return null;
     }
 
     private static void mergeSkrDocs(Map<Class<?>, RegistrationDoc> primary,
@@ -343,7 +338,7 @@ public class GenerateDocs {
             } catch (Exception ignored) {}
         }
 
-        Registration skrReg = findSkrRegistration(plugin);
+        Object skrReg = findSkrRegistration(plugin);
         if (skrReg != null) {
             Map<Class<?>, RegistrationDoc> skrDocs = buildSkrDocMap(skrReg);
             mergeSkrDocs(map, skrDocs);
@@ -401,12 +396,9 @@ public class GenerateDocs {
             Object doc = docMethod.invoke(registrar);
             if (doc == null) return null;
 
-            try {
-                Class<?> skrDocClass = Class.forName("com.github.shanebeee.skr.Documentation");
-                if (skrDocClass.isInstance(doc)) {
-                    return skrDocToRegistrationDoc((Documentation) doc);
-                }
-            } catch (ClassNotFoundException ignored) {}
+            if (isClassNamed(doc.getClass(), "com.github.shanebeee.skr.Documentation")) {
+                return skrDocToRegistrationDoc(doc);
+            }
 
             String name = invokeStr(doc, "getName");
             String[] desc = invokeStrArr(doc, "getDescription");
