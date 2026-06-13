@@ -39,23 +39,29 @@ public class GenerateDocs {
     private static final Set<String> REGISTRATION_METHODS =
             Set.of("getConditions", "getEffects", "getExpressions", "getEvents");
 
-    private static boolean isClassNamed(Class<?> cls, String fqn) {
-        for (Class<?> c = cls; c != null && c != Object.class; c = c.getSuperclass()) {
-            if (c.getName().equals(fqn)) return true;
-            for (Class<?> i : c.getInterfaces()) {
-                if (i.getName().equals(fqn)) return true;
-            }
-        }
-        return false;
-    }
-
     private static Object findSkrRegistration(Plugin plugin) {
         if (plugin == null) return null;
-        return findFieldByClassName(plugin, "com.github.shanebeee.skr.Registration");
+        return findFieldMatching(plugin, GenerateDocs::isSkrRegistration);
     }
 
-    @SuppressWarnings("SameParameterValue")
-    private static Object findFieldByClassName(Object obj, String targetClassName) {
+    private static boolean isSkrRegistration(Class<?> cls) {
+        Set<String> methods = new HashSet<>();
+        for (Method m : cls.getMethods()) methods.add(m.getName());
+        return methods.contains("getConditions") && methods.contains("getEffects")
+                && methods.contains("getExpressions") && methods.contains("getEvents")
+                && methods.contains("getTypes") && methods.contains("getAddon");
+    }
+
+    private static boolean isSkrDocumentation(Class<?> cls) {
+        for (Class<?> c = cls; c != null && c != Object.class; c = c.getSuperclass()) {
+            if (c.getSimpleName().equals("Documentation") && c.getName().endsWith(".skr.Documentation")) return true;
+        }
+        Set<String> methods = new HashSet<>();
+        for (Method m : cls.getMethods()) methods.add(m.getName());
+        return methods.contains("getName") && methods.contains("isNoDoc") && methods.contains("getId");
+    }
+
+    private static Object findFieldMatching(Object obj, java.util.function.Predicate<Class<?>> pred) {
         if (obj == null) return null;
         for (Class<?> c = obj.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
             for (Field f : c.getDeclaredFields()) {
@@ -63,13 +69,13 @@ public class GenerateDocs {
                     f.setAccessible(true);
                     Object val = f.get(obj);
                     if (val == null) continue;
-                    if (isClassNamed(val.getClass(), targetClassName)) return val;
+                    if (pred.test(val.getClass())) return val;
                     for (Class<?> c2 = val.getClass(); c2 != null && c2 != Object.class; c2 = c2.getSuperclass()) {
                         for (Field f2 : c2.getDeclaredFields()) {
                             try {
                                 f2.setAccessible(true);
                                 Object val2 = f2.get(val);
-                                if (val2 != null && isClassNamed(val2.getClass(), targetClassName)) return val2;
+                                if (val2 != null && pred.test(val2.getClass())) return val2;
                             } catch (Exception ignored) {}
                         }
                     }
@@ -189,7 +195,7 @@ public class GenerateDocs {
             m.setAccessible(true);
             Object result = m.invoke(registrar);
             if (result == null) return null;
-            if (isClassNamed(result.getClass(), "com.github.shanebeee.skr.Documentation")) return result;
+            if (isSkrDocumentation(result.getClass())) return result;
             return null;
         } catch (Exception ignored) {}
         return null;
@@ -396,7 +402,7 @@ public class GenerateDocs {
             Object doc = docMethod.invoke(registrar);
             if (doc == null) return null;
 
-            if (isClassNamed(doc.getClass(), "com.github.shanebeee.skr.Documentation")) {
+            if (isSkrDocumentation(doc.getClass())) {
                 return skrDocToRegistrationDoc(doc);
             }
 
@@ -511,6 +517,9 @@ public class GenerateDocs {
     }
 
     private static Plugin findPluginForAddon(SkriptAddon addon) {
+        Plugin skrPlugin = findPluginForSkrAddon(addon);
+        if (skrPlugin != null) return skrPlugin;
+
         Plugin p = Bukkit.getPluginManager().getPlugin(addon.name());
         if (p != null) return p;
 
@@ -534,8 +543,23 @@ public class GenerateDocs {
         return null;
     }
 
+    private static Plugin findPluginForSkrAddon(SkriptAddon addon) {
+        if (addon == null) return null;
+        for (Plugin pl : Bukkit.getPluginManager().getPlugins()) {
+            Object reg = findSkrRegistration(pl);
+            if (reg == null) continue;
+            Object regAddon = invokeMethod(reg, "getAddon");
+            if (regAddon == null) continue;
+            if (regAddon == addon) return pl;
+            String name = invokeStr(regAddon, "name");
+            if (name != null && name.equalsIgnoreCase(addon.name())) return pl;
+        }
+        return null;
+    }
+
     @SuppressWarnings({"unchecked", "rawtypes"})
     private static ClassLoader resolveLoaderFromSyntax(SkriptAddon addon) {
+        ClassLoader skriptLoader = ch.njol.skript.Skript.class.getClassLoader();
         SyntaxRegistry registry = addon.syntaxRegistry();
         for (SyntaxRegistry.Key key : new SyntaxRegistry.Key[]{
                 SyntaxRegistry.CONDITION, SyntaxRegistry.EFFECT,
@@ -544,7 +568,7 @@ public class GenerateDocs {
             for (Object raw : registry.syntaxes(key)) {
                 if (raw instanceof SyntaxInfo<?> info) {
                     ClassLoader cl = info.type().getClassLoader();
-                    if (cl != null && isPluginClassLoader(cl)) return cl;
+                    if (cl != null && cl != skriptLoader && isPluginClassLoader(cl)) return cl;
                 }
             }
         }
