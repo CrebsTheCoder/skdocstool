@@ -25,7 +25,9 @@ import org.skriptlang.skript.Skript;
 import org.skriptlang.skript.bukkit.lang.eventvalue.EventValue;
 import org.skriptlang.skript.bukkit.lang.eventvalue.EventValueRegistry;
 
+import java.io.IOException;
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.file.*;
 import java.util.*;
@@ -35,6 +37,10 @@ public class GenerateDocs {
 
     record RegistrationDoc(String name, String[] description, String[] examples,
                            String[] since, String[] keywords, boolean noDoc) {}
+
+    private record AddonContext(SkriptAddon addon, ClassLoader loader,
+                                Map<Class<?>, RegistrationDoc> registrationDocs,
+                                Map<Class<?>, Object> skrParsers) {}
 
     private static final Set<String> REGISTRATION_METHODS =
             Set.of("getConditions", "getEffects", "getExpressions", "getEvents");
@@ -494,11 +500,16 @@ public class GenerateDocs {
         for (SkriptAddon addon : addons) {
             String safe = sanitize(addon.name());
             try {
-                JsonObject skdocs = buildAddonDocs(addon);
+                Plugin owningPlugin = findPluginForAddon(addon);
+                AddonContext context = createAddonContext(addon, owningPlugin);
+                JsonObject skdocs = buildAddonDocs(context);
                 Files.writeString(outDir.resolve("skdocs-" + safe + ".json"), GSON.toJson(skdocs));
 
-                JsonObject skriptHub = buildSkriptHubDocs(addon);
-                Files.writeString(outDir.resolve("skripthub-" + safe + ".json"), GSON.toJson(skriptHub));
+                Path skriptHubFile = outDir.resolve("skripthub-" + safe + ".json");
+                if (!generateSkriptHubWithSkr(addon, owningPlugin, skriptHubFile, sender, log)) {
+                    JsonObject skriptHub = buildSkriptHubDocs(context);
+                    Files.writeString(skriptHubFile, GSON.toJson(skriptHub));
+                }
 
                 written++;
                 log.info("Generated docs for " + addon.name());
@@ -513,6 +524,52 @@ public class GenerateDocs {
         } else {
             sender.sendMessage(Component.text(
                     "Generated docs for " + written + " addon(s) in " + outDir, NamedTextColor.GREEN));
+        }
+    }
+
+    private static boolean generateSkriptHubWithSkr(SkriptAddon addon, Plugin owningPlugin,
+                                                    Path destination, CommandSender sender,
+                                                    Logger log) throws Exception {
+        if (owningPlugin == null || addon.name().equalsIgnoreCase("Skript")) return false;
+
+        String packageName = owningPlugin.getClass().getPackageName();
+        String registrationClassName = packageName + ".skr.Registration";
+        Field registrationField = null;
+        for (Field field : owningPlugin.getClass().getDeclaredFields()) {
+            if (field.getType().getName().equals(registrationClassName)) {
+                registrationField = field;
+                break;
+            }
+        }
+        if (registrationField == null) return false;
+
+        try {
+            ClassLoader loader = owningPlugin.getClass().getClassLoader();
+            Class<?> registrationClass = Class.forName(registrationClassName, true, loader);
+            Class<?> generatorClass = Class.forName(packageName + ".skr.JsonDocGenerator", true, loader);
+
+            registrationField.setAccessible(true);
+            Object registration = registrationField.get(owningPlugin);
+            if (registration == null) return false;
+
+            Object generator = generatorClass
+                    .getDeclaredConstructor(Plugin.class, registrationClass)
+                    .newInstance(owningPlugin, registration);
+
+            generatorClass.getDeclaredMethod("generateDocs").invoke(generator);
+
+            Path generatedFile = owningPlugin.getDataFolder().toPath().resolve("json-docs.json");
+            if (!Files.isRegularFile(generatedFile)) {
+                throw new IOException("SKR did not create " + generatedFile);
+            }
+
+            Files.createDirectories(destination.getParent());
+            Files.move(generatedFile, destination, StandardCopyOption.REPLACE_EXISTING);
+
+            return true;
+        } catch (InvocationTargetException e) {
+            Throwable cause = e.getCause() == null ? e : e.getCause();
+            throw new Exception(cause.getMessage(), cause);
         }
     }
 
@@ -567,6 +624,7 @@ public class GenerateDocs {
                 SyntaxRegistry.STRUCTURE}) {
             for (Object raw : registry.syntaxes(key)) {
                 if (raw instanceof SyntaxInfo<?> info) {
+                    if (!info.origin().name().equalsIgnoreCase(addon.name())) continue;
                     ClassLoader cl = info.type().getClassLoader();
                     if (cl != null && cl != skriptLoader && isPluginClassLoader(cl)) return cl;
                 }
@@ -575,18 +633,27 @@ public class GenerateDocs {
         return null;
     }
 
-    private static ClassLoader resolveAddonClassLoader(SkriptAddon addon) {
-        Plugin owningPlugin = findPluginForAddon(addon);
+    private static ClassLoader resolveAddonClassLoader(SkriptAddon addon, Plugin owningPlugin) {
+        ClassLoader syntaxLoader = resolveLoaderFromSyntax(addon);
+        if (syntaxLoader != null) return syntaxLoader;
+
         if (owningPlugin != null) return owningPlugin.getClass().getClassLoader();
         return addon.source().getClassLoader();
     }
 
-    private static JsonObject buildAddonDocs(SkriptAddon addon) {
+    private static AddonContext createAddonContext(SkriptAddon addon, Plugin owningPlugin) {
+        ClassLoader loader = resolveAddonClassLoader(addon, owningPlugin);
+        Map<Class<?>, RegistrationDoc> registrationDocs = buildRegistrationDocMap(owningPlugin);
+        Object skrRegistration = findSkrRegistration(owningPlugin);
+        Map<Class<?>, Object> skrParsers = buildSkrParserMap(skrRegistration);
+        return new AddonContext(addon, loader, registrationDocs, skrParsers);
+    }
+
+    private static JsonObject buildAddonDocs(AddonContext context) {
+        SkriptAddon addon = context.addon();
         SyntaxRegistry registry = addon.syntaxRegistry();
-        ClassLoader loader = resolveAddonClassLoader(addon);
-        Plugin owningPlugin = findPluginForAddon(addon);
-        Map<Class<?>, RegistrationDoc> regDocs = buildRegistrationDocMap(owningPlugin);
-        Map<Class<?>, Object> skrParsers = buildSkrParserMap(findSkrRegistration(owningPlugin));
+        ClassLoader loader = context.loader();
+        Map<Class<?>, RegistrationDoc> regDocs = context.registrationDocs();
 
         JsonArray events = eventsArray(registry, loader, regDocs, false, addon.name());
         JsonArray conditions = syntaxArray(registry, SyntaxRegistry.CONDITION, loader, regDocs);
@@ -594,7 +661,7 @@ public class GenerateDocs {
         JsonArray expressions = syntaxArray(registry, SyntaxRegistry.EXPRESSION, loader, regDocs);
         JsonArray sections = syntaxArray(registry, SyntaxRegistry.SECTION, loader, regDocs);
         JsonArray structures = syntaxArray(registry, SyntaxRegistry.STRUCTURE, loader, regDocs);
-        JsonArray types = typesArray(loader, regDocs, skrParsers);
+        JsonArray types = typesArray(loader, regDocs, context.skrParsers());
         JsonArray functions = functionsArray(addon, loader);
 
         Set<String> idSet = new LinkedHashSet<>();
@@ -623,18 +690,17 @@ public class GenerateDocs {
         return root;
     }
 
-    private static JsonObject buildSkriptHubDocs(SkriptAddon addon) {
+    private static JsonObject buildSkriptHubDocs(AddonContext context) {
+        SkriptAddon addon = context.addon();
         SyntaxRegistry registry = addon.syntaxRegistry();
-        ClassLoader loader = resolveAddonClassLoader(addon);
-        Plugin owningPlugin = findPluginForAddon(addon);
-        Map<Class<?>, RegistrationDoc> regDocs = buildRegistrationDocMap(owningPlugin);
-        Map<Class<?>, Object> skrParsers = buildSkrParserMap(findSkrRegistration(owningPlugin));
+        ClassLoader loader = context.loader();
+        Map<Class<?>, RegistrationDoc> regDocs = context.registrationDocs();
 
         JsonArray events = shEventsArray(registry, loader, regDocs, addon.name());
         JsonArray conditions = shSyntaxArray(registry, SyntaxRegistry.CONDITION, loader, regDocs);
         JsonArray effects = shSyntaxArray(registry, SyntaxRegistry.EFFECT, loader, regDocs);
         JsonArray expressions = shSyntaxArray(registry, SyntaxRegistry.EXPRESSION, loader, regDocs);
-        JsonArray types = shTypesArray(loader, regDocs, skrParsers);
+        JsonArray types = shTypesArray(loader, regDocs, context.skrParsers());
         JsonArray functions = shFunctionsArray(addon, loader);
         JsonArray sections = shSyntaxArray(registry, SyntaxRegistry.SECTION, loader, regDocs);
         JsonArray structures = shSyntaxArray(registry, SyntaxRegistry.STRUCTURE, loader, regDocs);
