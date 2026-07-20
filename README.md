@@ -9,7 +9,7 @@ for [skdocs](https://skdocs.org).
 - Skript 2.16.0+
 
 ## Download Release
-### [Download](https://github.com/CrebsTheCoder/skdocstool/releases)
+### [Download](github.com/CrebsTheCoder/skdocstool/releases/latest)
 
 ## Usage
 
