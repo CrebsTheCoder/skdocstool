@@ -13,7 +13,7 @@ repositories {
 
 dependencies {
     compileOnly("io.papermc.paper:paper-api:1.21.11-R0.1-SNAPSHOT")
-    compileOnly("com.github.SkriptLang:Skript:2.15.0-pre1")
+    compileOnly("com.github.SkriptLang:Skript:2.16.0")
     implementation("com.google.code.gson:gson:2.10.1")
     compileOnly("com.github.shanebeee:SkriptRegistration:1.4.2")
 }
@@ -29,7 +29,7 @@ tasks {
         systemProperty("com.mojang.eula.agree", "true")
 
         downloadPlugins {
-            url("https://github.com/SkriptLang/Skript/releases/download/2.15.0-pre1/Skript-2.15.0-pre1.jar")
+            url("https://github.com/SkriptLang/Skript/releases/download/2.16.0/Skript-2.16.0.jar")
         }
     }
 

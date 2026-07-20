@@ -965,17 +965,71 @@ public class GenerateDocs {
         java.util.regex.Pattern[] userPatterns = info.getUserInputPatterns();
         if (userPatterns != null && userPatterns.length > 0) {
             for (java.util.regex.Pattern p : userPatterns) {
-                String readable = p.pattern()
-                        .replaceAll("\\\\([()\\[\\]])", "$1")
-                        .replaceAll("\\(([^)]+)\\)\\?", "[$1]")
-                        .replaceAll("(.)\\?", "[$1]")
-                        .replaceAll("\\s+", " ").trim();
-                arr.add(readable);
+                arr.add(readableUserPattern(p.pattern()));
             }
         } else {
             arr.add(info.getCodeName());
         }
         return arr;
+    }
+
+    private static List<String> eventValueIdentifiers(EventValue<?, ?> ev) {
+        Collection<String> explicit = ev.patterns();
+        if (explicit != null && !explicit.isEmpty()) {
+            List<String> result = new ArrayList<>();
+            for (String p : explicit) {
+                String c = cleanEventValuePattern(p);
+                if (c != null && !c.isBlank()) result.add(c);
+            }
+            if (!result.isEmpty()) return result;
+        }
+        return identifiersForValueClass(ev.valueClass());
+    }
+
+    private static List<String> identifiersForValueClass(Class<?> valClass) {
+        Class<?> type = valClass != null && valClass.isArray() ? valClass.getComponentType() : valClass;
+
+        if (type != null) {
+            ClassInfo<?> info = Classes.getExactClassInfo(type);
+            if (info != null) {
+                List<String> result = userPatternIdentifiers(info.getUserInputPatterns());
+                if (!result.isEmpty()) return result;
+            }
+        }
+
+        if (type == null) return List.of();
+        return List.of(type.getSimpleName().toLowerCase(Locale.ENGLISH));
+    }
+
+    private static List<String> userPatternIdentifiers(java.util.regex.Pattern[] userPatterns) {
+        if (userPatterns == null || userPatterns.length == 0) return List.of();
+        List<String> result = new ArrayList<>();
+        for (java.util.regex.Pattern p : userPatterns) {
+            String r = readableUserPattern(p.pattern());
+            if (!r.isBlank()) result.add(r);
+        }
+        return result;
+    }
+
+    private static String readableUserPattern(String regex) {
+        if (regex == null) return "";
+        return regex
+                .replaceAll("\\\\([()\\[\\]])", "$1")
+                .replaceAll("\\(([^)]+)\\)\\?", "[$1]")
+                .replaceAll("(.)\\?", "[$1]")
+                .replaceAll("\\s+", " ")
+                .trim();
+    }
+
+    private static String cleanEventValuePattern(String pattern) {
+        if (pattern == null) return null;
+        String p = pattern.trim();
+        p = p.replaceAll("\\[([^\\[\\]]*)\\]", "$1");
+        if (p.contains("|")) {
+            String first = p.split("\\|", 2)[0].trim();
+            if (!first.isBlank()) p = first;
+        }
+        return p.replaceAll("\\s+", " ").trim();
     }
 
     private static JsonArray eventsArray(SyntaxRegistry registry, ClassLoader loader,
@@ -1125,66 +1179,19 @@ public class GenerateDocs {
                     }
                     if (!applicable) continue;
 
-                    ClassInfo<?> ci = Classes.getSuperClassInfo(valClass);
-                    String codeName = ci.getCodeName();
-
                     String prefix = switch (ev.time().toString()) {
                         case "PAST" -> "past event-";
                         case "FUTURE" -> "future event-";
                         default -> "event-";
                     };
-                    values.add(prefix + codeName);
-                }
-                if (!values.isEmpty()) return values.toArray(new String[0]);
-            }
-        } catch (Exception ignored) {}
-
-        try {
-            Class<?> legacyClass = Class.forName("ch.njol.skript.registrations.EventValues");
-            try {
-                @SuppressWarnings("all")
-                java.lang.reflect.Method getList = legacyClass.getMethod("getEventValuesList", int.class);
-                String[] prefixes = {"past event-", "event-", "future event-"};
-                Set<String> values = new TreeSet<>();
-
-                for (int i = 0; i < 3; i++) {
-                    Collection<?> list = (Collection<?>) getList.invoke(null, i - 1);
-                    if (list == null) continue;
-                    for (Object evi : list) {
-                        Class<?> evtClass = getInternalField(evi, "eventClass", "eClass", "e");
-                        Class<?> valClass = getInternalField(evi, "valueClass", "vClass", "c");
-                        if (evtClass == null || valClass == null) continue;
-                        for (Class<?> eventClass : evArr) {
-                            if (evtClass.isAssignableFrom(eventClass) || eventClass.isAssignableFrom(evtClass)) {
-                                ClassInfo<?> ci = Classes.getSuperClassInfo(valClass);
-                                String codeName = ci.getCodeName();
-                                values.add(prefixes[i] + codeName);
-                                break;
-                            }
-                        }
+                    for (String id : eventValueIdentifiers(ev)) {
+                        if (!id.isBlank()) values.add(prefix + id);
                     }
                 }
                 if (!values.isEmpty()) return values.toArray(new String[0]);
-            } catch (NoSuchMethodException ignored) {}
+            }
         } catch (Exception ignored) {}
 
-        return null;
-    }
-
-    @SuppressWarnings("unchecked")
-    private static <T> Class<T> getInternalField(Object obj, String... names) {
-        for (String name : names) {
-            for (Class<?> c = obj.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
-                for (java.lang.reflect.Field f : c.getDeclaredFields()) {
-                    if (!f.getName().equals(name)) continue;
-                    try {
-                        f.setAccessible(true);
-                        Object val = f.get(obj);
-                        if (val instanceof Class<?>) return (Class<T>) val;
-                    } catch (Exception ignored) {}
-                }
-            }
-        }
         return null;
     }
 
