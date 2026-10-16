@@ -2,8 +2,10 @@ name: skdocstool
 version: '$version'
 author: Crebs
 main: org.skdocs.skdocstool.Skdocstool
-api-version: '1.21.11'
+api-version: '26.3'
 load: POSTWORLD
+depend: [Skript]
+softdepend: [SkBee, Lusk, PacketEventsSK]
 
 commands:
   gendocs:

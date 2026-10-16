@@ -5,8 +5,8 @@ for [skdocs](https://skdocs.org).
 
 ## Requirements
 
-- Paper 1.21.11+
-- Skript 2.16.0+
+- Paper 26.3+
+- Skript 2.17+
 
 ## Download Release
 ### [Download](github.com/CrebsTheCoder/skdocstool/releases/latest)
