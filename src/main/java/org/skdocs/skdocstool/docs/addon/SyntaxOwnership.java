@@ -1,20 +1,28 @@
 package org.skdocs.skdocstool.docs.addon;
 
 import ch.njol.skript.lang.SyntaxElementInfo;
+import ch.njol.skript.lang.SkriptEventInfo;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import org.skriptlang.skript.bukkit.registration.BukkitSyntaxInfos;
 import org.skriptlang.skript.docs.Origin;
 import org.skriptlang.skript.registration.SyntaxInfo;
+import org.skdocs.skdocstool.docs.registration.LegacyEventAttribution;
 
 public final class SyntaxOwnership {
     private final List<AddonContext> addons;
     private final ClassLoader coreLoader;
+    private final boolean explicitLegacyEventOrigins;
 
     public SyntaxOwnership(List<AddonContext> addons, ClassLoader coreLoader) {
+        this(addons, coreLoader, LegacyEventAttribution.supported());
+    }
+
+    SyntaxOwnership(List<AddonContext> addons, ClassLoader coreLoader, boolean explicitLegacyEventOrigins) {
         this.addons = List.copyOf(addons);
         this.coreLoader = coreLoader;
+        this.explicitLegacyEventOrigins = explicitLegacyEventOrigins;
     }
 
     public boolean owns(SyntaxInfo<?> syntax, AddonContext addon) {
@@ -23,17 +31,20 @@ public final class SyntaxOwnership {
 
     @SuppressWarnings("removal")
     public AddonContext owner(SyntaxInfo<?> syntax) {
+        AddonContext declared = null;
+        if (syntax.origin() instanceof Origin.AddonOrigin origin) {
+            declared = addons.stream().filter(a -> a.addon().name().equals(origin.addon().name()))
+                .findFirst().orElse(null);
+        }
+        if (explicitLegacyEventOrigins && syntax instanceof SkriptEventInfo.ModernSkriptEventInfo<?>
+                && declared != null) return declared;
+
         Set<AddonContext> registered = new LinkedHashSet<>();
         for (AddonContext addon : addons)
             if (addon.registrationDocs().syntax(syntax.type(), syntax.patterns()) != null)
                 registered.add(addon);
         if (registered.size() == 1) return registered.iterator().next();
 
-        AddonContext declared = null;
-        if (syntax.origin() instanceof Origin.AddonOrigin origin) {
-            declared = addons.stream().filter(a -> a.addon().name().equals(origin.addon().name()))
-                .findFirst().orElse(null);
-        }
         if (!(syntax instanceof SyntaxElementInfo<?>) && declared != null) return declared;
 
         if (syntax instanceof BukkitSyntaxInfos.Event<?> event) {

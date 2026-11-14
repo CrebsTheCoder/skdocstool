@@ -14,6 +14,7 @@ import java.util.TreeSet;
 import org.skdocs.skdocstool.docs.addon.AddonContext;
 import org.skdocs.skdocstool.docs.addon.SyntaxOwnership;
 import org.skdocs.skdocstool.docs.registration.RegistrationMetadata;
+import org.skdocs.skdocstool.docs.registration.LegacyEventAttribution;
 import org.skdocs.skdocstool.docs.builder.DocumentationFormat;
 import org.skriptlang.skript.Skript;
 import org.skriptlang.skript.bukkit.lang.eventvalue.EventValue;
@@ -115,7 +116,7 @@ public final class EventDocumentation implements DocumentationElement {
                 obj.add("since", strings(since));
                 obj.add("requiredPlugins", strings(info.requiredPlugins()));
                 obj.add("keywords", strings(prefer(keywords, info.keywords().toArray(new String[0]))));
-                obj.addProperty("source", type.getName());
+                obj.addProperty("source", LegacyEventAttribution.source(info));
             }
 
             String[] eventValues = collectEventValues(info.events());

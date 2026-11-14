@@ -21,7 +21,36 @@ class SyntaxOwnershipTest {
     private final AddonContext core = addon("Engine", coreLoader);
     private final Class<?> eventClass = eventClass();
     private final AddonContext addon = addon("UnrelatedName", eventClass.getClassLoader());
-    private final SyntaxOwnership ownership = new SyntaxOwnership(List.of(core, addon), coreLoader);
+    private final SyntaxOwnership ownership = new SyntaxOwnership(List.of(core, addon), coreLoader, false);
+
+    @Test void fixedLegacyOriginWinsOverUnderlyingEventProvider() {
+        var resolver = new SyntaxOwnership(List.of(core, addon), coreLoader, true);
+        var event = legacyEvent();
+        assertSame(core, resolver.owner(event));
+    }
+
+    @Test void fixedLegacyAddonOriginWinsOverAnotherAddonsEvent() {
+        var registrar = addon("Registrar", new ClassLoader() {});
+        var resolver = new SyntaxOwnership(List.of(core, addon, registrar), coreLoader, true);
+        var event = legacyEvent();
+        when(event.origin()).thenReturn((Origin.AddonOrigin) () -> registrar.addon());
+        assertSame(registrar, resolver.owner(event));
+    }
+
+    @Test void fixedLegacyUnknownOriginStillUsesEventProvider() {
+        var resolver = new SyntaxOwnership(List.of(core, addon), coreLoader, true);
+        var event = legacyEvent();
+        when(event.origin()).thenReturn(Origin.UNKNOWN);
+        assertSame(addon, resolver.owner(event));
+    }
+
+    @Test void fixedLegacyOriginWinsOverScannedRegistrationMetadata() {
+        var resolver = new SyntaxOwnership(List.of(core, addon), coreLoader, true);
+        var event = legacyEvent();
+        addon.registrationDocs().putSyntax(SimpleEvent.class, new String[]{"signal"},
+            new RegistrationMetadata(null, "Signal", null, null, null, null, false));
+        assertSame(core, resolver.owner(event));
+    }
 
     @Test void legacySharedSyntaxBelongsToTheUnderlyingEventProvider() {
         var event = legacyEvent();
@@ -56,7 +85,7 @@ class SyntaxOwnershipTest {
     @Test void ambiguousEventProvidersAreNotAssignedToCore() {
         var otherClass = eventClass();
         var other = addon("AnotherName", otherClass.getClassLoader());
-        var resolver = new SyntaxOwnership(List.of(core, addon, other), coreLoader);
+        var resolver = new SyntaxOwnership(List.of(core, addon, other), coreLoader, false);
         var event = legacyEvent();
         when(event.events()).thenReturn(List.of(eventClass, otherClass));
         assertNull(resolver.owner(event));
