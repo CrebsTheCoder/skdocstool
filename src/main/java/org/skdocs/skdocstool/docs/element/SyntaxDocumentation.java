@@ -73,13 +73,13 @@ public final class SyntaxDocumentation<I extends SyntaxInfo<?>> implements Docum
 
         if (format == DocumentationFormat.SKRIPT_HUB) {
             addStrings(entry, "description", description);
-            addStrings(entry, "examples", examples);
+            addStrings(entry, "examples", org.skdocs.skdocstool.docs.builder.DocumentationText.cleanExamples(examples));
             addStrings(entry, "since", since);
             addStrings(entry, "keywords", keywords);
             addStrings(entry, "required plugins", requiredPluginsOf(type));
         } else {
             entry.add("description", strings(description));
-            entry.add("examples", strings(examples));
+            entry.add("examples", strings(org.skdocs.skdocstool.docs.builder.DocumentationText.cleanExamples(examples)));
             entry.add("since", strings(since));
             entry.add("keywords", strings(keywords));
             entry.add("requiredPlugins", strings(requiredPluginsOf(type)));

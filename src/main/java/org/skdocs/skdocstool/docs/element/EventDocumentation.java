@@ -106,13 +106,13 @@ public final class EventDocumentation implements DocumentationElement {
 
             if (skriptHub) {
                 addStrings(obj, "description", desc);
-                addStrings(obj, "examples", examples);
+                addStrings(obj, "examples", org.skdocs.skdocstool.docs.builder.DocumentationText.cleanExamples(examples));
                 addStrings(obj, "since", since);
                 addStrings(obj, "required plugins", info.requiredPlugins().toArray(new String[0]));
                 addStrings(obj, "keywords", prefer(keywords, info.keywords().toArray(String[]::new)));
             } else {
                 obj.add("description", strings(desc));
-                obj.add("examples", strings(examples));
+                obj.add("examples", strings(org.skdocs.skdocstool.docs.builder.DocumentationText.cleanExamples(examples)));
                 obj.add("since", strings(since));
                 obj.add("requiredPlugins", strings(info.requiredPlugins()));
                 obj.add("keywords", strings(prefer(keywords, info.keywords().toArray(new String[0]))));
