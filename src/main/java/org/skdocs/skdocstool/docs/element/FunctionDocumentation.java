@@ -65,7 +65,7 @@ public final class FunctionDocumentation implements DocumentationElement {
 
             if (skriptHub) {
                 addStrings(obj, "description", description);
-                addStrings(obj, "examples", examples);
+                addStrings(obj, "examples", org.skdocs.skdocstool.docs.builder.DocumentationText.cleanExamples(examples));
                 addStrings(obj, "since", since);
                 addStrings(obj, "keywords", keywords);
                 addStrings(obj, "required plugins", requires);
@@ -76,7 +76,7 @@ public final class FunctionDocumentation implements DocumentationElement {
                 if (returnType != null) obj.addProperty("return type", returnType);
             } else {
                 obj.add("description", strings(description));
-                obj.add("examples", strings(examples));
+                obj.add("examples", strings(org.skdocs.skdocstool.docs.builder.DocumentationText.cleanExamples(examples)));
                 obj.add("since", strings(since));
                 obj.add("keywords", strings(keywords));
                 obj.add("requiredPlugins", strings(requires));

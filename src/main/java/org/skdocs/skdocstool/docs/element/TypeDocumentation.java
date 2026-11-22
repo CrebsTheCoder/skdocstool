@@ -56,7 +56,7 @@ public final class TypeDocumentation implements DocumentationElement {
             }
 
             String[] description = prefer(cleanHtml(info.getDescription()), rd != null ? rd.description() : null);
-            String[] examples    = prefer(cleanHtml(info.getExamples()),    rd != null ? rd.examples()     : null);
+            String[] examples    = prefer(info.getExamples(), rd != null ? rd.examples() : null);
             String   since       = info.getSince();
             if ((since == null || since.isBlank()) && rd != null && hasContent(rd.since())) {
                 since = String.join(", ", rd.since());
@@ -77,7 +77,7 @@ public final class TypeDocumentation implements DocumentationElement {
 
             if (skriptHub) {
                 addStrings(obj, "description", description);
-                addStrings(obj, "examples", examples);
+                addStrings(obj, "examples", org.skdocs.skdocstool.docs.builder.DocumentationText.cleanExamples(examples));
                 if (since != null && !since.isBlank()) {
                     JsonArray sa = new JsonArray();
                     sa.add(since);
@@ -90,7 +90,7 @@ public final class TypeDocumentation implements DocumentationElement {
             } else {
                 obj.addProperty("codeName", info.getCodeName());
                 obj.add("description", strings(description));
-                obj.add("examples", strings(examples));
+                obj.add("examples", strings(org.skdocs.skdocstool.docs.builder.DocumentationText.cleanExamples(examples)));
                 obj.addProperty("since", since);
                 obj.add("requiredPlugins", strings(info.getRequiredPlugins()));
                 obj.addProperty("source", typeSource(info));

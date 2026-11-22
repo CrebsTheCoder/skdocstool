@@ -24,6 +24,11 @@ public final class DocumentationText {
         return fallback;
     }
 
+    public static String[] cleanExamples(String[] values) {
+        if (values == null) return new String[0];
+        return Arrays.stream(values).filter(value -> value != null && !value.isBlank()).toArray(String[]::new);
+    }
+
     public static String readableUserPattern(String regex) {
         if (regex == null) return "";
         return regex
